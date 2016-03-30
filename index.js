@@ -6,9 +6,11 @@
     const Wreck = require('wreck');
     const Snyk = require('snyk');
 
+    const cache = require('./cache');
+
     const server = new Hapi.Server();
 
-    var packageCache = {};
+    const packageCache = cache.cache;
 
     function throwErrors(err) {
         if (err) {
@@ -33,7 +35,8 @@
             var versions = payload.versions,
                 keys = Object.keys(versions),
                 path = request.params.path,
-                tests = [];
+                tests = [],
+                cacheChanged = false;
 
             keys.forEach(function(value){
                 tests.push(
@@ -60,6 +63,7 @@
                                     console.log('good:', toTest);
                                 }
                                 resolve();
+                                cacheChanged = true;
                             }, function (data) {
                                 let sanitized = data || {};
 
@@ -72,6 +76,7 @@
                                     console.log('good:', toTest);
                                 }
                                 resolve();
+                                cacheChanged = true;
                             });
                         }
                     })
@@ -80,10 +85,16 @@
 
             Promise.all(tests).then(function(){
                 reply(payload);
+
+                // Save changes to the packageCache
+                if (cacheChanged) {
+                    cache.save();
+                }
             });
 
         });
     }
+
 
     server.connection({port: 3000});
 
@@ -103,6 +114,11 @@
         });
     });
 
-    server.start(handleServerStart);
+    // Load the stored cache. Using merge and noFail
+    cache.load(true, true).then(function(){
+
+        // Once the package cache is available, start the server
+        server.start(handleServerStart);
+    });
 
 })();
