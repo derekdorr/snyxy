@@ -16,9 +16,9 @@ const configFile = 'config.json';
 
 // Default settings.
 const settings = {
-    cacheTime: 864e5, // milliseconds in a day
     cacheFile: 'packageCache.json',
     cacheSaveFrequency: 30000, // 30 seconds
+    cacheTime: 864e5, // milliseconds in a day
     log: true,
     logErrors: false,
     npmServerURL: 'https://registry.npmjs.org/',
