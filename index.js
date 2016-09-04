@@ -6,11 +6,19 @@
     const Wreck = require('wreck');
     const Snyk = require('snyk');
 
-    const cache = require('./cache');
+    const configPromise = require('./config');
 
     const server = new Hapi.Server();
 
-    const packageCache = cache.cache;
+    let packageCache;
+    let config;
+
+    function log(...args) {
+        if (config.log === false) {
+            return;
+        }
+        console.log(...args);
+    }
 
     function throwErrors(err) {
         if (err) {
@@ -21,11 +29,11 @@
     function handleServerStart(err) {
         throwErrors(err);
 
-        console.log('server running on: ',server.info.uri);
+        log('server running on: ',server.info.uri);
     }
 
     function handleRegistryRequest(request, callback) {
-        callback(null, 'https://registry.npmjs.org/' + request.params.path);
+        callback(null, config.npmServerURL + request.params.path);
     }
 
     function handleRegistryResponse(err, res, request, reply, settings, ttl) {
@@ -42,25 +50,26 @@
                 tests.push(
                     new Promise(function(resolve) {
                         let toTest = `${path}@${value}`;
-                        let cachedState = packageCache[toTest];
+                        let validState = packageCache.get(toTest);
 
-                        if (cachedState !== undefined) {
-                            if (cachedState === true) {
-                                console.log('good:', toTest, '(from cache)');
+                        if (validState !== undefined) {
+
+                            if (validState === true) {
+                                log('good:', toTest, '(from cache)');
                             } else {
                                 delete versions[value];
-                                console.log('bad:', toTest, '(from cache)');
+                                log('bad:', toTest, '(from cache)');
                             }
-                            resolve();
+                            resolve(validState);
                         } else {
                             Snyk.test(toTest).then(function (data) {
                                 if (data.ok !== true) {
-                                    console.log('bad:', toTest);
-                                    packageCache[toTest] = false;
+                                    log('bad:', toTest);
+                                    packageCache.set(toTest, false);
                                     delete versions[value];
                                 } else {
-                                    packageCache[toTest] = true;
-                                    console.log('good:', toTest);
+                                    packageCache.set(toTest, true);
+                                    log('good:', toTest);
                                 }
                                 resolve();
                                 cacheChanged = true;
@@ -68,12 +77,12 @@
                                 let sanitized = data || {};
 
                                 if (sanitized.ok !== true) {
-                                    console.log('bad:', toTest);
-                                    packageCache[toTest] = false;
+                                    log('bad:', toTest);
+                                    packageCache.set(toTest, false);
                                     delete versions[value];
                                 } else {
-                                    packageCache[toTest] = true;
-                                    console.log('good:', toTest);
+                                    packageCache.set(toTest, true);
+                                    log('good:', toTest);
                                 }
                                 resolve();
                                 cacheChanged = true;
@@ -88,37 +97,38 @@
 
                 // Save changes to the packageCache
                 if (cacheChanged) {
-                    cache.save();
+                    packageCache.save();
                 }
             });
 
         });
     }
 
+    // Once the package cache is available, start the server
+    configPromise.then(function(mod) {
+        packageCache = mod.cache;
+        config = mod.config.settings;
 
-    server.connection({port: 3000});
+        server.connection({port: config.serverPort});
 
-    server.register([H2O2],function(err){
+        server.register([H2O2],function(err){
 
-        throwErrors(err);
+            throwErrors(err);
 
-        server.route({
-            method: "GET",
-            path: "/{path*}",
-            handler: {
-                proxy: {
-                    mapUri: handleRegistryRequest,
-                    onResponse: handleRegistryResponse
+            server.route({
+                method: "GET",
+                path: "/{path*}",
+                handler: {
+                    proxy: {
+                        mapUri: handleRegistryRequest,
+                        onResponse: handleRegistryResponse
+                    }
                 }
-            }
+            });
+
+
+            server.start(handleServerStart);
         });
-    });
-
-    // Load the stored cache. Using merge and noFail
-    cache.load(true, true).then(function(){
-
-        // Once the package cache is available, start the server
-        server.start(handleServerStart);
     });
 
 })();

@@ -1,9 +1,10 @@
 {
   "name": "snyxy",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Secure proxy to NPM",
   "main": "index.js",
   "scripts": {
+    "start": "node ./index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Derek Dorr",
@@ -11,6 +12,7 @@
   "dependencies": {
     "h2o2": "^5.1.0",
     "hapi": "^13.2.1",
+    "lodash.throttle": "^4.1.1",
     "snyk": "^1.12.0",
     "wreck": "^7.0.2"
   }
