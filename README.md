@@ -14,6 +14,10 @@ To start, clone to your local machine and run:
 ```bash
 node index.js
 ```
+or
+```bash
+npm start
+```
 To use, edit your npm config:
 ```bash
 npm config edit
