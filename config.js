@@ -2,27 +2,30 @@
 // Configuration should allow this to eventually be replaced
 //   by a DB or service call to provide a central packageCache for multiple instances
 
+// Packages
 const fs = require('fs');
+const throttle = require('lodash.throttle');
+
+// Blatantly adapted from github.com/tarruda/has
+// Because sparse objects are real and great and ruin everything.
+const has = Function.bind.call(Function.call, Object.prototype.hasOwnProperty);
+
+// Base config
 const dataPath = './data/';
 const configFile = 'config.json';
 
-const defaultConfig = {
+// Default settings.
+const settings = {
     cacheTime: 864e5, // milliseconds in a day
     cacheFile: 'packageCache.json',
+    cacheSaveFrequency: 30000, // 30 seconds
     log: true,
     logErrors: false,
     npmServerURL: 'https://registry.npmjs.org/',
     serverPort: 3000
 };
 
-const settings = defaultConfig;
-
 const packageCache = {};
-
-// Blatantly adapted from github.com/tarruda/has
-// Because sparse objects are real and great and ruin everything.
-const has = Function.bind.call(Function.call, Object.prototype.hasOwnProperty);
-
 
 /**
  * Console.log wrapper with config flag
@@ -70,30 +73,36 @@ function changeSettings (newSettings) {
     return saveConfigFile();
 }
 
-
+/**
+ * Checks for and attempts to create the path if missing.
+ * @param {String} path
+ * @returns {Promise}
+ */
 function checkOrMakeDir(path){
 
     return new Promise(function (resolve, reject) {
 
-        // Returns are because I hate nesting try/catch
-        try {
-            fs.statSync(path);
-            resolve('existed');
-            return;
-        } catch (e) {
-            if (e.code !== 'ENOENT') {
+        // Check for directory
+        fs.stat(path, function(err) {
+            if (!err) {
+                resolve('existed');
+                return;
+            } else if (err.code !== 'ENOENT') {
                 reject(err);
                 return;
             }
-        }
-        // Now make the directory
-        try {
-            fs.mkdirSync(path);
-            resolve('created');
-        } catch(e) {
-            logerr(err);
-            reject(err);
-        }
+
+            fs.mkdir(path, function (err) {
+                if (!err) {
+                    resolve('created');
+                    return;
+                }
+
+                logerr(err);
+                reject(err);
+            });
+        });
+
     });
 }
 
@@ -240,7 +249,11 @@ function savePackageCacheFile() {
     });
 
 }
-
+/**
+ * Create a packageCache entry, with timestamp
+ * @param {String} key
+ * @param {Boolean} valid
+ */
 function setPackageCacheEntry(key, valid) {
     packageCache[key] = {
         valid: valid,
@@ -248,6 +261,11 @@ function setPackageCacheEntry(key, valid) {
     }
 }
 
+/**
+ * Get packageCache entry. If it has expired, remove it and return undefined
+ * @param {String} key
+ * @returns {Boolean|undefined}
+ */
 function checkPackageCacheEntry(key) {
     let cachedState = packageCache[key];
 
@@ -256,7 +274,7 @@ function checkPackageCacheEntry(key) {
     }
 
     if (typeof cachedState !== 'object' ||  !has(cachedState, 'valid') || !has(cachedState, 'timestamp')) {
-        log('Bad or outdated record for',key);
+        log('Bad or outdated record for', key);
         // Bad entries should be removed
         cachedState[key] = undefined;
         return false;
@@ -270,20 +288,22 @@ function checkPackageCacheEntry(key) {
     return cachedState.valid;
 }
 
-/* TODO - consider removing exposure of packageCache and replacing it with a getter & setter
- * That would allow the removal of the emptyObject functionality,
- * And sanitization on the setter would guarantee the no self-reference loops in the stringify command
- */
+let throttledSaveCache = savePackageCacheFile;
+
 
 // Load settings immediately. Use the promise chain for the export.
 module.exports = loadConfigFile().then(function(){
+    if (settings.cacheSaveFrequency) {
+        throttledSaveCache = throttle(savePackageCacheFile, settings.cacheSaveFrequency);
+    }
+
     return loadPackageCacheFile(true, true);
 }).then(function(){
     return {
         cache: {
             get: checkPackageCacheEntry,
             set: setPackageCacheEntry,
-            save: savePackageCacheFile,
+            save: throttledSaveCache,
             object: packageCache
         },
         config: {
