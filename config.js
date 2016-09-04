@@ -8,8 +8,9 @@ const configFile = 'config.json';
 
 const defaultConfig = {
     cacheTime: 864e5, // milliseconds in a day
-    dataCacheFile: 'packageCache.json',
+    cacheFile: 'packageCache.json',
     log: true,
+    logErrors: false,
     npmServerURL: 'https://registry.npmjs.org/',
     serverPort: 3000
 };
@@ -22,6 +23,7 @@ const packageCache = {};
 // Because sparse objects are real and great and ruin everything.
 const has = Function.bind.call(Function.call, Object.prototype.hasOwnProperty);
 
+
 /**
  * Console.log wrapper with config flag
  * @param args
@@ -32,6 +34,14 @@ function log(...args) {
     }
     console.log(...args);
 }
+
+function errlog(...args) {
+    if (settings.logErrors === false) {
+        return;
+    }
+    console.log(...args);
+}
+
 
 /**
  * Deletes all keys from the object
@@ -47,6 +57,7 @@ function emptyObject (obj) {
 /**
  * Update the settings values
  * @param {Object} newSettings
+ * @returns {Promise}
  */
 function changeSettings (newSettings) {
     // Only allow the injection of settings we already have/accept
@@ -56,15 +67,41 @@ function changeSettings (newSettings) {
         }
     });
     // Save it to disk
-    saveConfigFile();
+    return saveConfigFile();
+}
+
+
+function checkOrMakeDir(path){
+
+    return new Promise(function (resolve, reject) {
+
+        // Returns are because I hate nesting try/catch
+        try {
+            fs.statSync(path);
+            resolve('existed');
+            return;
+        } catch (e) {
+            if (e.code !== 'ENOENT') {
+                reject(err);
+                return;
+            }
+        }
+        // Now make the directory
+        try {
+            fs.mkdirSync(path);
+            resolve('created');
+        } catch(e) {
+            logerr(err);
+            reject(err);
+        }
+    });
 }
 
 /**
- *
+ * Load the config file
  * @returns {Promise}
  */
 function loadConfigFile() {
-
     return new Promise(function (resolve, reject) {
         const path = dataPath + configFile;
         fs.readFile(path, function (err, data) {
@@ -81,10 +118,10 @@ function loadConfigFile() {
             } else {
                 if (err.code === 'ENOENT') {
                     // Save a default if none exists. Otherwise, leave it alone and log the error.
-                    log('Config not found. Generating default config.json.')
+                    log('Config not found. Creating default config.json.');
                     saveConfigFile();
                 } else {
-                    log(err);
+                    errlog(err);
                 }
             }
 
@@ -101,19 +138,28 @@ function loadConfigFile() {
  * @returns {Promise}
  */
 function saveConfigFile() {
-    const output = JSON.stringify(settings, undefined, 1);
-    return new Promise(function (resolve, reject){
 
-        const path = dataPath + configFile;
-        fs.writeFile(path, output, function (err){
-            if (err) {
-                reject(err);
-            } else {
-                log('Saved ' + configFile);
-                resolve();
-            }
+    return checkOrMakeDir(dataPath).then(function(){
+        const output = JSON.stringify(settings, undefined, 1);
+        return new Promise(function (resolve, reject){
+
+            const path = dataPath + configFile;
+            fs.writeFile(path, output, function (err){
+                if (err) {
+                    log('Unable to save', configFile);
+                    errlog(err);
+                    reject(err);
+                } else {
+                    log('Saved', configFile);
+                    resolve();
+                }
+            });
         });
+    }, function(err){
+        log('Unable to access data directory. No config will be saved.');
+        throw err;
     });
+
 }
 
 /**
@@ -126,7 +172,7 @@ function loadPackageCacheFile(merge, noFail) {
     const shouldMerge = merge !== false;
 
     return new Promise(function (resolve, reject) {
-        const path = dataPath + settings.dataCacheFile;
+        const path = dataPath + settings.cacheFile;
         fs.readFile(path, function (err, data) {
 
             if (err) {
@@ -159,7 +205,7 @@ function loadPackageCacheFile(merge, noFail) {
             }
         });
     }).then(function (cache){
-        log('Loaded ' + settings.dataCacheFile);
+        log('Loaded ' + settings.cacheFile);
 
         return cache;
     });
@@ -172,19 +218,27 @@ function loadPackageCacheFile(merge, noFail) {
  * @returns {Promise}
  */
 function savePackageCacheFile() {
-    const output = JSON.stringify(packageCache, undefined, 1);
-    return new Promise(function (resolve, reject){
 
-        const path = dataPath + settings.dataCacheFile;
-        fs.writeFile(path, output, function (err){
-            if (err) {
-                reject(err);
-            } else {
-                log('Saved packageCache.');
-                resolve();
-            }
+    return checkOrMakeDir(dataPath).then(function(){
+        const output = JSON.stringify(packageCache, undefined, 1);
+        return new Promise(function (resolve, reject){
+
+            const path = dataPath + settings.cacheFile;
+            fs.writeFile(path, output, function (err){
+                if (err) {
+                    errlog(err);
+                    reject(err);
+                } else {
+                    log('Saved packageCache.');
+                    resolve('saved');
+                }
+            });
         });
+    }, function(err){
+        log('Unable to access data directory. No packageCache will be saved.');
+        throw err;
     });
+
 }
 
 function setPackageCacheEntry(key, valid) {
